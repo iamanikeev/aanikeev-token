@@ -1,4 +1,13 @@
-import { SystemProgram, Signer, PublicKey, Keypair, Transaction, Commitment, ConfirmOptions, AccountInfo } from "@solana/web3.js";
+import {
+  SystemProgram,
+  Signer,
+  PublicKey,
+  Keypair,
+  Transaction,
+  Commitment,
+  ConfirmOptions,
+  AccountInfo,
+} from "@solana/web3.js";
 
 import * as token from "@solana/spl-token";
 import { BanksClient, BanksTransactionMeta } from "solana-bankrun";
@@ -136,7 +145,6 @@ export async function getMint(
   const info = await banksClient.getAccount(address, commitment);
   return token.unpackMint(address, info as AccountInfo<Buffer>, programId);
 }
-
 
 export async function mintTo(
   banksClient: BanksClient,
