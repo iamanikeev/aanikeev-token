@@ -112,6 +112,11 @@ describe("Test initialization", () => {
     } catch {
       initialBalance = 0;
     }
+    const signerPDA = web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("authority"), payer.publicKey.toBuffer()],
+      new web3.PublicKey(programId)
+    )[0]
+    console.log(`Signer PDA: ${signerPDA}`)
     const tx = await program.methods
       .mintTokens(new BN(10 * LAMPORTS_PER_SOL))
       .accounts(

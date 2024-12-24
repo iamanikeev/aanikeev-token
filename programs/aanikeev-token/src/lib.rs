@@ -7,6 +7,11 @@ mod error;
 
 declare_id!("FrD3XdeVm7hcRUK2mu5CKSwiG57fDVW5Z3nK6WFbq9mS");
 
+pub fn asd() {
+    CpiContext::new_with_signer()
+}
+
+
 #[program]
 pub mod aanikeev_token {
     use super::*;
@@ -15,6 +20,7 @@ pub mod aanikeev_token {
         ctx.accounts.config.authority = authority.key();
         ctx.accounts.config.mint = ctx.accounts.mint.key();
         ctx.accounts.config.is_configured = true;
+        msg!("Authority key: {}", ctx.accounts.config.authority);
         Ok(())
     }
 
@@ -58,11 +64,12 @@ pub struct MintTokens<'info> {
     #[account(
         mut,
         associated_token::mint = mint,
-        associated_token::authority = signer,
+        associated_token::authority = config.authority,
     )]
     pub destination: Account<'info, TokenAccount>,
+    /// CHECK: pda signer account
     #[account(mut, seeds=[b"authority", config.authority.key().as_ref()], bump)]
-    pub signer: Signer<'info>,
+    pub signer: UncheckedAccount<'info>,
     pub rent: Sysvar<'info, Rent>,
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
