@@ -2,18 +2,19 @@ import * as anchor from "@coral-xyz/anchor";
 
 import * as u from "./utils";
 import { beforeAll, describe, expect, test } from "vitest";
-import { PublicKey, LAMPORTS_PER_SOL, Keypair } from "@solana/web3.js";
+import { PublicKey, LAMPORTS_PER_SOL, Keypair, Transaction } from "@solana/web3.js";
 import { startAnchor } from "solana-bankrun";
 import { BankrunProvider } from "anchor-bankrun";
 import { Program, web3 } from "@coral-xyz/anchor";
 import { AanikeevToken } from "../target/types/aanikeev_token";
 import BN from "bn.js";
 import {
-  getAccount,
   createMint,
   getMint,
-  createAssociatedTokenAccount
+  createAssociatedTokenAccount,
 } from "spl-token-bankrun";
+import {getAccountBalance} from "./utils";
+import { createApproveInstruction } from "@solana/spl-token";
 
 const getConfigIdempotent = async (program: any) => {
   const config = await u.fetchConfigIfExists(
@@ -35,6 +36,8 @@ let programId: string;
 let mint: PublicKey;
 let tokenAccount: PublicKey;
 let programSignerAddress: PublicKey;
+let fakeAdminTokenAccount: PublicKey;
+
 beforeAll(async () => {
   context = await startAnchor(
     ".",
@@ -67,6 +70,13 @@ beforeAll(async () => {
     mint,
     payer.publicKey
   );
+  fakeAdminTokenAccount = await createAssociatedTokenAccount(
+    context.banksClient,
+    payer,
+    mint,
+    fakeAdmin.publicKey
+  );
+
   const mintInfo = await getMint(context.banksClient, mint);
   console.log(`Mint supply: ${mintInfo.supply}`);
   console.log(`Mint authority: ${mintInfo.mintAuthority}`);
@@ -104,43 +114,57 @@ describe("Test initialization", () => {
     }).rejects.toThrowError(/already in use/);
   });
 
-  test("Should mint to wallet account", async () => {
-    let initialBalance: number;
-    try {
-      const balance = await program.connection.getTokenAccountBalance(
-        tokenAccount
-      );
-      initialBalance = balance.value.uiAmount;
-    } catch {
-      initialBalance = 0;
-    }
-
-    const tx = await program.methods
-      .mintTokens(new BN(10 * LAMPORTS_PER_SOL))
+  test("Should mint to own account", async () => {
+    const initialBalance = await getAccountBalance(context.banksClient, tokenAccount);
+    console.log(`Balance before mint: ${initialBalance}`);
+    const amountToMint = 10 * LAMPORTS_PER_SOL;
+    console.log(`Amount to mint: ${amountToMint}`);
+    await program.methods
+      .mintTokens(new BN(amountToMint))
       .accounts({
         mint,
         destination: tokenAccount,
         destinationAccountHolder: payer.publicKey,
         config: await u.getConfigAddress(programId)(),
         signerPda: programSignerAddress,
-        rent: web3.SYSVAR_RENT_PUBKEY,
-        systemProgram: web3.SystemProgram.programId,
-        tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
-        associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
       })
       .rpc();
 
-    const receiverTokenAccount = await getAccount(context.banksClient, tokenAccount)
+    const balanceAfterMint = await getAccountBalance(context.banksClient, tokenAccount);
+    console.log(`Balance after mint: ${balanceAfterMint}`);
+    expect(new BN(initialBalance + amountToMint).toNumber()).equal(
+      new BN(balanceAfterMint).toNumber(),
+      "Balance mismatch"
+    );
+  });
 
-    expect(new BN(initialBalance + 10 * LAMPORTS_PER_SOL).toNumber()).equal(
-      new BN(receiverTokenAccount.amount).toNumber(),
+  test("Should mint to wallet account", async () => {
+    const initialBalance = await getAccountBalance(context.banksClient, fakeAdminTokenAccount);
+    console.log(`Balance before mint: ${initialBalance}`);
+    const amountToMint = 10 * LAMPORTS_PER_SOL;
+    console.log(`Amount to mint: ${amountToMint}`);
+    await program.methods
+      .mintTokens(new BN(amountToMint))
+      .accounts({
+        mint,
+        destination: fakeAdminTokenAccount,
+        destinationAccountHolder: fakeAdmin.publicKey,
+        config: await u.getConfigAddress(programId)(),
+        signerPda: programSignerAddress,
+      })
+      .rpc();
+
+    const balanceAfterMint = await getAccountBalance(context.banksClient, fakeAdminTokenAccount);
+    console.log(`Balance after mint: ${balanceAfterMint}`);
+    expect(new BN(initialBalance + amountToMint).toNumber()).equal(
+      new BN(balanceAfterMint).toNumber(),
       "Balance mismatch"
     );
   });
 
   test("Shouldn't be able to mint by wrong authority", async () => {
     await expect(async () => {
-      const tx = await program.methods
+      await program.methods
         .mintTokens(new BN(10 * LAMPORTS_PER_SOL))
         .accounts({
           mint,
@@ -149,13 +173,72 @@ describe("Test initialization", () => {
           config: await u.getConfigAddress(programId)(),
           signer: fakeAdmin.publicKey,
           signerPda: programSignerAddress,
-          rent: web3.SYSVAR_RENT_PUBKEY,
-          systemProgram: web3.SystemProgram.programId,
-          tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
-          associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
         })
         .signers([fakeAdmin])
         .rpc();
     }).rejects.toThrowError("Not permitted");
   });
+
+  test("Should be able to burn tokens from own account", async () => {
+    const initialBalance = await getAccountBalance(context.banksClient, tokenAccount);
+    console.log(`Balance before burn: ${initialBalance}`);
+    const amountToBurn = 2 * LAMPORTS_PER_SOL
+    await program.methods
+      .burnTokens(new BN(amountToBurn))
+      .accounts({
+        mint,
+        burnFrom: tokenAccount,
+        burnFromAccountHolder: payer.publicKey,
+        config: await u.getConfigAddress(programId)(),
+        signerPda: programSignerAddress,
+      })
+      .rpc();
+    const balanceAfterBurn = await getAccountBalance(context.banksClient, tokenAccount);
+    console.log(`Balance after burn: ${balanceAfterBurn}`);
+    expect(new BN(balanceAfterBurn).toNumber()).equal(
+      new BN(initialBalance - amountToBurn).toNumber(),
+      "Balance mismatch"
+    );
+  })
+
+  test("Shouldn't be able to burn tokens w/o delegated approval", async () => {
+    const amountToBurn = 2 * LAMPORTS_PER_SOL
+    await expect(async () => {
+      await program.methods
+        .burnTokens(new BN(amountToBurn))
+        .accounts({
+          mint,
+          burnFrom: fakeAdminTokenAccount,
+          burnFromAccountHolder: fakeAdmin.publicKey,
+          config: await u.getConfigAddress(programId)(),
+          signerPda: programSignerAddress,
+        })
+        .rpc();
+    }).rejects.toThrowError("Cross-program invocation with unauthorized signer or writable account");
+  })
+
+  test("Should be able to burn tokens with delegated approval", async () => {
+    const amountToBurn = 2 * LAMPORTS_PER_SOL
+    const initialBalance = await getAccountBalance(context.banksClient, fakeAdminTokenAccount);
+    console.log(`Balance before burn: ${initialBalance}`);
+    const transaction = new Transaction().add(
+      createApproveInstruction(fakeAdminTokenAccount, payer.publicKey, fakeAdmin.publicKey, amountToBurn),
+    );
+    [transaction.recentBlockhash] = (await context.banksClient.getLatestBlockhash())!;
+    transaction.sign(fakeAdmin);
+    await context.banksClient.processTransaction(transaction)
+    await program.methods
+      .burnTokens(new BN(amountToBurn))
+      .accounts({
+        mint,
+        burnFrom: fakeAdminTokenAccount,
+        burnFromAccountHolder: fakeAdmin.publicKey,
+        config: await u.getConfigAddress(programId)(),
+        signerPda: programSignerAddress,
+      })
+      .signers([payer])
+      .rpc();
+    const balanceAfterBurn = await getAccountBalance(context.banksClient, fakeAdminTokenAccount);
+    console.log(`Balance after burn: ${balanceAfterBurn}`);
+  })
 });

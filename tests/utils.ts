@@ -1,7 +1,10 @@
 import * as web3 from "@solana/web3.js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { AddedAccount } from "solana-bankrun";
+import {AddedAccount, BanksClient} from "solana-bankrun";
+import {Program} from "@coral-xyz/anchor";
+import { AanikeevToken } from "../target/types/aanikeev_token";
+import {AccountLayout} from "@solana/spl-token";
 
 function getKeypair(relativePath: string): web3.Keypair {
   return web3.Keypair.fromSecretKey(
@@ -79,4 +82,9 @@ export async function fetchConfigIfExists(
     console.log(`ERROR fetch config: ${e}`);
     return null;
   }
+}
+
+export async function getAccountBalance(banksClient: BanksClient, address: web3.PublicKey) {
+  const account = await banksClient.getAccount(address);
+  return Number(AccountLayout.decode(account?.data).amount);
 }

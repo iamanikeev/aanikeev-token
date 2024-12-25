@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::AnchorSerialize;
 use anchor_spl::associated_token::AssociatedToken;
-use anchor_spl::token::{mint_to, Mint, MintTo, Token, TokenAccount};
+use anchor_spl::token::{mint_to, Mint, MintTo, Token, TokenAccount, burn, Burn};
 
 mod error;
 
@@ -43,6 +43,31 @@ pub mod aanikeev_token {
         )?;
         Ok(())
     }
+    pub fn burn_tokens(ctx: Context<BurnTokens>, amount: u64) -> Result<()> {
+        if ctx.accounts.mint.key().ne(&ctx.accounts.config.mint.key()) {
+            return err!(error::ErrorCode::NotPermitted);
+        }
+        if ctx.accounts.signer.key().ne(&ctx.accounts.config.authority.key()) {
+            return err!(error::ErrorCode::NotPermitted);
+        }
+        burn(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Burn {
+                    mint: ctx.accounts.mint.to_account_info(),
+                    from: ctx.accounts.burn_from.to_account_info(),
+                    authority: ctx.accounts.burn_from_account_holder.to_account_info()
+                },
+                &[&[
+                    b"authority",
+                    &ctx.accounts.config.authority.key().as_ref(),
+                    &[ctx.bumps.signer_pda],
+                ]],
+            ),
+            amount,
+        )?;
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -68,16 +93,36 @@ pub struct MintTokens<'info> {
         associated_token::authority = destination_account_holder,
     )]
     pub destination: Account<'info, TokenAccount>,
-    #[account(mut, seeds=[b"authority", config.authority.key().as_ref()], bump)]
     /// CHECK: PDA account signing the CPI
+    #[account(mut, seeds=[b"authority", config.authority.key().as_ref()], bump)]
     pub signer_pda: AccountInfo<'info>,
     pub signer: Signer<'info>,
     /// CHECK: destination account holder
     pub destination_account_holder: AccountInfo<'info>,
-    pub rent: Sysvar<'info, Rent>,
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
+}
+
+#[derive(Accounts)]
+pub struct BurnTokens<'info> {
+    #[account(seeds=[b"config"], bump)]
+    pub config: Account<'info, Config>,
+    #[account(mut)]
+    pub mint: Account<'info, Mint>,
+    #[account(
+        mut,
+        associated_token::mint = mint,
+        associated_token::authority = burn_from_account_holder,
+    )]
+    pub burn_from: Account<'info, TokenAccount>,
+    /// CHECK: PDA account signing the CPI
+    #[account(mut, seeds=[b"authority", config.authority.key().as_ref()], bump)]
+    pub signer_pda: AccountInfo<'info>,
+    pub signer: Signer<'info>,
+    /// CHECK: destination account holder
+    pub burn_from_account_holder: AccountInfo<'info>,
+    pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
 }
 
 #[account]
