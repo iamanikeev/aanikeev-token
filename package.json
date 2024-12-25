@@ -11,11 +11,13 @@
     "@solana/spl-token": "^0.4.9",
     "anchor-bankrun": "^0.5.0",
     "solana-bankrun": "^0.4.0",
+    "spl-token-bankrun": "^0.2.6",
     "vitest": "^2.1.8"
   },
   "devDependencies": {
     "@types/bn.js": "^5.1.0",
     "prettier": "^2.6.2",
     "typescript": "^4.3.5"
-  }
+  },
+  "packageManager": "pnpm@9.15.0+sha512.76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c"
 }

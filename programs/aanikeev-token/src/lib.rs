@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::AnchorSerialize;
 use anchor_spl::associated_token::AssociatedToken;
-use anchor_spl::token::{Mint, Token, TokenAccount, MintTo, mint_to};
+use anchor_spl::token::{mint_to, Mint, MintTo, Token, TokenAccount};
 
 mod error;
 
@@ -30,7 +30,11 @@ pub mod aanikeev_token {
                     to: ctx.accounts.destination.to_account_info(),
                     authority: ctx.accounts.signer.to_account_info(),
                 },
-                &[&[b"authority", &ctx.accounts.config.authority.key().as_ref(), &[ctx.bumps.signer]]],
+                &[&[
+                    b"authority",
+                    &ctx.accounts.config.authority.key().as_ref(),
+                    &[ctx.bumps.signer],
+                ]],
             ),
             amount,
         )?;
@@ -58,11 +62,14 @@ pub struct MintTokens<'info> {
     #[account(
         mut,
         associated_token::mint = mint,
-        associated_token::authority = signer,
+        associated_token::authority = receiver,
     )]
     pub destination: Account<'info, TokenAccount>,
     #[account(mut, seeds=[b"authority", config.authority.key().as_ref()], bump)]
-    pub signer: Signer<'info>,
+    /// CHECK: specify signer which is PDA account
+    pub signer: AccountInfo<'info>,
+    /// CHECK: destination account holder
+    pub receiver: AccountInfo<'info>,
     pub rent: Sysvar<'info, Rent>,
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,

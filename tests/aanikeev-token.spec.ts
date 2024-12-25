@@ -1,14 +1,20 @@
 import * as anchor from "@coral-xyz/anchor";
 
 import * as u from "./utils";
-import {beforeAll, describe, expect, test} from "vitest";
-import {PublicKey, LAMPORTS_PER_SOL, Keypair} from '@solana/web3.js';
-import {createMint, getMint, createAssociatedTokenAccount, mintTo} from "./bankrun-spl-utils"
-import {startAnchor} from "solana-bankrun";
-import {BankrunProvider} from "anchor-bankrun";
-import {Program, web3} from "@coral-xyz/anchor";
-import {AanikeevToken} from "../target/types/aanikeev_token";
+import { beforeAll, describe, expect, test } from "vitest";
+import { PublicKey, LAMPORTS_PER_SOL, Keypair } from "@solana/web3.js";
+import {
+  createMint,
+  getMint,
+  createAssociatedTokenAccount,
+  mintTo,
+} from "./bankrun-spl-utils";
+import { startAnchor } from "solana-bankrun";
+import { BankrunProvider } from "anchor-bankrun";
+import { Program, web3 } from "@coral-xyz/anchor";
+import { AanikeevToken } from "../target/types/aanikeev_token";
 import BN from "bn.js";
+import { getAccount } from "spl-token-bankrun";
 
 const getConfigIdempotent = async (program: any) => {
   const config = await u.fetchConfigIfExists(
@@ -29,7 +35,7 @@ let programId: string;
 
 let mint: PublicKey;
 let tokenAccount: PublicKey;
-
+let programSignerAddress: PublicKey;
 beforeAll(async () => {
   context = await startAnchor(
     ".",
@@ -44,13 +50,17 @@ beforeAll(async () => {
   program = anchor.workspace.AanikeevToken as Program<AanikeevToken>;
   programId = u.getProgramId(program);
   payer = context.payer;
+  programSignerAddress = web3.PublicKey.findProgramAddressSync(
+    [Buffer.from("authority"), payer.publicKey.toBuffer()],
+    new web3.PublicKey(programId)
+  )[0];
 
   mint = await createMint(
     context.banksClient,
     payer,
-    payer.publicKey,
+    programSignerAddress,
     null,
-    9,
+    9
   );
   tokenAccount = await createAssociatedTokenAccount(
     context.banksClient,
@@ -58,17 +68,15 @@ beforeAll(async () => {
     mint,
     payer.publicKey
   );
-  const mintInfo = await getMint(
-    context.banksClient,
-    mint
-  );
+  const mintInfo = await getMint(context.banksClient, mint);
   console.log(`Mint supply: ${mintInfo.supply}`);
   console.log(`Mint authority: ${mintInfo.mintAuthority}`);
-  console.log(`Context payer: ${context.payer.publicKey}, Provider payer: ${provider.wallet.payer.publicKey}`);
+  console.log(
+    `Context payer: ${context.payer.publicKey}, Provider payer: ${provider.wallet.payer.publicKey}, PDA Authority ${programSignerAddress}`
+  );
 });
 
 describe("Test initialization", () => {
-
   test("Should be able to initialize", async () => {
     const tx = await program.methods
       .initialize(payer.publicKey)
@@ -102,37 +110,39 @@ describe("Test initialization", () => {
       context.banksClient,
       payer,
       mint,
-      admin.publicKey,
+      admin.publicKey
     );
 
     let initialBalance: number;
     try {
-      const balance = (await program.connection.getTokenAccountBalance(destination))
+      const balance = await program.connection.getTokenAccountBalance(
+        destination
+      );
       initialBalance = balance.value.uiAmount;
     } catch {
       initialBalance = 0;
     }
+
     const tx = await program.methods
       .mintTokens(new BN(10 * LAMPORTS_PER_SOL))
-      .accounts(
-        {
-          mint,
-          destination: tokenAccount,
-          config: await u.getConfigAddress(programId)(),
-          signer: web3.PublicKey.findProgramAddressSync(
-            [Buffer.from("authority"), payer.publicKey.toBuffer()],
-            new web3.PublicKey(programId)
-          ),
-          rent: web3.SYSVAR_RENT_PUBKEY,
-          systemProgram: web3.SystemProgram.programId,
-          tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
-          associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
-        }
-      )
+      .accounts({
+        mint,
+        destination,
+        config: await u.getConfigAddress(programId)(),
+        signer: programSignerAddress,
+        receiver: admin.publicKey,
+        rent: web3.SYSVAR_RENT_PUBKEY,
+        systemProgram: web3.SystemProgram.programId,
+        tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
+        associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
+      })
       .rpc();
-    const postBalance = (
-      await program.connection.getTokenAccountBalance(destination)
-    ).value.uiAmount;
-    expect(initialBalance + 10 * LAMPORTS_PER_SOL).equal(postBalance, "Balance mismatch");
-  })
+
+    const receiverTokenAccount = await getAccount(context.banksClient, destination)
+
+    expect(new BN(initialBalance + 10 * LAMPORTS_PER_SOL).toNumber()).equal(
+      new BN(receiverTokenAccount.amount).toNumber(),
+      "Balance mismatch"
+    );
+  });
 });
