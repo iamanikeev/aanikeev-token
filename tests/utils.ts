@@ -12,7 +12,7 @@ function getKeypair(relativePath: string): web3.Keypair {
   );
 }
 
-export const adminKeypair = getKeypair(".solana/admin.json");
+export const fakeAdminKeypair = getKeypair(".solana/fake-admin.json");
 
 export const getFundedWalletAccount = (
   address: web3.PublicKey,

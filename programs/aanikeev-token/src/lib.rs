@@ -22,18 +22,21 @@ pub mod aanikeev_token {
         if ctx.accounts.mint.key().ne(&ctx.accounts.config.mint.key()) {
             return err!(error::ErrorCode::NotPermitted);
         }
+        if ctx.accounts.signer.key().ne(&ctx.accounts.config.authority.key()) {
+            return err!(error::ErrorCode::NotPermitted);
+        }
         mint_to(
             CpiContext::new_with_signer(
                 ctx.accounts.token_program.to_account_info(),
                 MintTo {
                     mint: ctx.accounts.mint.to_account_info(),
                     to: ctx.accounts.destination.to_account_info(),
-                    authority: ctx.accounts.signer.to_account_info(),
+                    authority: ctx.accounts.signer_pda.to_account_info(),
                 },
                 &[&[
                     b"authority",
                     &ctx.accounts.config.authority.key().as_ref(),
-                    &[ctx.bumps.signer],
+                    &[ctx.bumps.signer_pda],
                 ]],
             ),
             amount,
@@ -62,14 +65,15 @@ pub struct MintTokens<'info> {
     #[account(
         mut,
         associated_token::mint = mint,
-        associated_token::authority = receiver,
+        associated_token::authority = destination_account_holder,
     )]
     pub destination: Account<'info, TokenAccount>,
     #[account(mut, seeds=[b"authority", config.authority.key().as_ref()], bump)]
-    /// CHECK: specify signer which is PDA account
-    pub signer: AccountInfo<'info>,
+    /// CHECK: PDA account signing the CPI
+    pub signer_pda: AccountInfo<'info>,
+    pub signer: Signer<'info>,
     /// CHECK: destination account holder
-    pub receiver: AccountInfo<'info>,
+    pub destination_account_holder: AccountInfo<'info>,
     pub rent: Sysvar<'info, Rent>,
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,

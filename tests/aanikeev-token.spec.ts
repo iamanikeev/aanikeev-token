@@ -3,18 +3,17 @@ import * as anchor from "@coral-xyz/anchor";
 import * as u from "./utils";
 import { beforeAll, describe, expect, test } from "vitest";
 import { PublicKey, LAMPORTS_PER_SOL, Keypair } from "@solana/web3.js";
-import {
-  createMint,
-  getMint,
-  createAssociatedTokenAccount,
-  mintTo,
-} from "./bankrun-spl-utils";
 import { startAnchor } from "solana-bankrun";
 import { BankrunProvider } from "anchor-bankrun";
 import { Program, web3 } from "@coral-xyz/anchor";
 import { AanikeevToken } from "../target/types/aanikeev_token";
 import BN from "bn.js";
-import { getAccount } from "spl-token-bankrun";
+import {
+  getAccount,
+  createMint,
+  getMint,
+  createAssociatedTokenAccount
+} from "spl-token-bankrun";
 
 const getConfigIdempotent = async (program: any) => {
   const config = await u.fetchConfigIfExists(
@@ -25,7 +24,7 @@ const getConfigIdempotent = async (program: any) => {
   return config;
 };
 
-const admin = u.adminKeypair;
+const fakeAdmin = u.fakeAdminKeypair;
 let payer: Keypair;
 
 let context: Awaited<ReturnType<typeof startAnchor>>;
@@ -42,7 +41,7 @@ beforeAll(async () => {
     [],
     [
       // Airdrop funds to accounts
-      u.getFundedWalletAccount(u.adminKeypair.publicKey),
+      u.getFundedWalletAccount(u.fakeAdminKeypair.publicKey),
     ]
   );
   provider = new BankrunProvider(context);
@@ -105,18 +104,11 @@ describe("Test initialization", () => {
     }).rejects.toThrowError(/already in use/);
   });
 
-  test("Should mint specified amount to specified account", async () => {
-    const destination = await createAssociatedTokenAccount(
-      context.banksClient,
-      payer,
-      mint,
-      admin.publicKey
-    );
-
+  test("Should mint to wallet account", async () => {
     let initialBalance: number;
     try {
       const balance = await program.connection.getTokenAccountBalance(
-        destination
+        tokenAccount
       );
       initialBalance = balance.value.uiAmount;
     } catch {
@@ -127,10 +119,10 @@ describe("Test initialization", () => {
       .mintTokens(new BN(10 * LAMPORTS_PER_SOL))
       .accounts({
         mint,
-        destination,
+        destination: tokenAccount,
+        destinationAccountHolder: payer.publicKey,
         config: await u.getConfigAddress(programId)(),
-        signer: programSignerAddress,
-        receiver: admin.publicKey,
+        signerPda: programSignerAddress,
         rent: web3.SYSVAR_RENT_PUBKEY,
         systemProgram: web3.SystemProgram.programId,
         tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
@@ -138,11 +130,32 @@ describe("Test initialization", () => {
       })
       .rpc();
 
-    const receiverTokenAccount = await getAccount(context.banksClient, destination)
+    const receiverTokenAccount = await getAccount(context.banksClient, tokenAccount)
 
     expect(new BN(initialBalance + 10 * LAMPORTS_PER_SOL).toNumber()).equal(
       new BN(receiverTokenAccount.amount).toNumber(),
       "Balance mismatch"
     );
+  });
+
+  test("Shouldn't be able to mint by wrong authority", async () => {
+    await expect(async () => {
+      const tx = await program.methods
+        .mintTokens(new BN(10 * LAMPORTS_PER_SOL))
+        .accounts({
+          mint,
+          destination: tokenAccount,
+          destinationAccountHolder: payer.publicKey,
+          config: await u.getConfigAddress(programId)(),
+          signer: fakeAdmin.publicKey,
+          signerPda: programSignerAddress,
+          rent: web3.SYSVAR_RENT_PUBKEY,
+          systemProgram: web3.SystemProgram.programId,
+          tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
+          associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
+        })
+        .signers([fakeAdmin])
+        .rpc();
+    }).rejects.toThrowError("Not permitted");
   });
 });
