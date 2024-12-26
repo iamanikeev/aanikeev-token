@@ -221,13 +221,11 @@ describe("Test initialization", () => {
     const amountToBurn = 2 * LAMPORTS_PER_SOL
     const initialBalance = await getAccountBalance(context.banksClient, fakeAdminTokenAccount);
     console.log(`Balance before burn: ${initialBalance}`);
-    const transaction = new Transaction().add(
-      createApproveInstruction(fakeAdminTokenAccount, payer.publicKey, fakeAdmin.publicKey, amountToBurn),
+    const transaction = new Transaction();
+    transaction.add(
+      createApproveInstruction(fakeAdminTokenAccount, programSignerAddress, fakeAdmin.publicKey, amountToBurn)
     );
-    [transaction.recentBlockhash] = (await context.banksClient.getLatestBlockhash())!;
-    transaction.sign(fakeAdmin);
-    await context.banksClient.processTransaction(transaction)
-    await program.methods
+    const instruction = await program.methods
       .burnTokens(new BN(amountToBurn))
       .accounts({
         mint,
@@ -235,9 +233,13 @@ describe("Test initialization", () => {
         burnFromAccountHolder: fakeAdmin.publicKey,
         config: await u.getConfigAddress(programId)(),
         signerPda: programSignerAddress,
+        signer: payer.publicKey,
       })
-      .signers([payer])
-      .rpc();
+      .instruction();
+    transaction.add(instruction);
+    [transaction.recentBlockhash] = (await context.banksClient.getLatestBlockhash())!;
+    transaction.sign(fakeAdmin, payer);
+    await context.banksClient.processTransaction(transaction)
     const balanceAfterBurn = await getAccountBalance(context.banksClient, fakeAdminTokenAccount);
     console.log(`Balance after burn: ${balanceAfterBurn}`);
   })
